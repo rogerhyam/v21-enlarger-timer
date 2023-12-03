@@ -19,7 +19,7 @@ class V21:
             "mode"  : "Burn", # the mode we are in: Expose | Burn | Test | Focus | Run
             "base"  : 0.0,     # the basic exposure in seconds - defaults to a useful number
             "stops" : 1.0,      # number of stops over or under the base we are set for a main exposure
-            "burn"  : 0.0,      # the number of stops over the base exposure that is set for the next burn
+            "burn"  : 0.1,      # the number of stops over the base exposure that is set for the next burn
             "steps" : 7,        # the number of steps in a test strip 
             "interval" : 0.5,   # the size of a step in a test strip
             "steps_mod": False, # whether we are changing the steps or interval
@@ -75,7 +75,7 @@ class V21:
         if self.encoder_old_value != val_new:
             if self.state["mode"] == "Burn":
                 self.state["burn"] = self.state["burn"] + ( (val_new - self.encoder_old_value)* 0.1 )
-                if self.state["burn"] < 0.0: self.state["burn"] = 0.0 # never below zero
+                if self.state["burn"] < 0.1: self.state["burn"] = 0.1 # never below 0.1 
                 self.state["burn"] = round(self.state["burn"], 1)
             elif self.state["mode"] == "Test":
                 if self.state["steps_mod"]:
@@ -109,6 +109,39 @@ class V21:
     # the base and stops variables
     def get_burn_duration(self):
         return (self.state["base"] * pow(2, self.state["burn"])) - self.state["base"]
+    
+    def get_step_duration(self):
+        
+        # this is worked out heuristically
+        # a better mathmetician would do it differently
+        
+        target_exposures = list();
+        steps_either_side = (self.state['steps']-1) / 2
+        
+        # work from the right
+        for i in range(steps_either_side):            
+            stripe = (steps_either_side - i) * -1
+            stops_off = stripe  * self.state["interval"]
+            duration = self.state["base"] * pow(2, stops_off)
+            target_exposures.append(duration)
+            
+        # add the base exposure in the middle
+        target_exposures.append(self.state["base"])
+        
+        for i in range(steps_either_side):
+            stripe = i+1
+            stops_off = stripe * self.state["interval"]
+            duration = self.state["base"] * pow(2, stops_off)
+            target_exposures.append(duration)
+        
+        # now take them away so they are additive.
+        additional_exposures = list();
+        for i in range(len(target_exposures)):
+            duration = target_exposures[i]
+            duration = duration - sum(additional_exposures)    
+            additional_exposures.append(duration)
+            
+        return additional_exposures[self.state['step']]
 
 
     def mode_btn_pressed(self):
@@ -127,7 +160,7 @@ class V21:
             self.state["base"] = self.get_exposure_duration() # the base becomes the calcuated duration
             self.state["stops"] = 0.0 # and we are now at the base so zero the stops
         elif self.state["mode"] == "Burn":
-            self.state["burn"] = 0.0 # convenience reset
+            self.state["burn"] = 0.1 # convenience reset
         elif self.state["mode"] == "Test":
             # toggle between changing the steps and step
             self.state["steps_mod"] = not self.state["steps_mod"]
@@ -203,72 +236,91 @@ class V21:
         
         # something has changes
         
-        # duration - calculated and updated with a change in any of the values! 
-        if self.state["mode"] == 'Burn':
-            duration = self.get_burn_duration();
-        else:
-            duration = self.get_exposure_duration();
-        
-        duration = round(duration, 1)
-        secs = f"{duration}s";
-        self.lcd.setCursor(10, 0)
-        self.lcd.printout(f"{secs: >6}")
-        
-        # if the mode has changed we update the label
-        if self.display_state["mode"] != self.state["mode"]:
+        if self.state["mode"] == "Expose":
+            
+            # title
             self.lcd.setCursor(0, 0)
-            self.lcd.printout('{message: <11}'.format(message=self.state['mode']))
+            self.lcd.printout('Expose    ')
 
-        # base
-        if self.display_state["base"] != self.state["base"] or ( self.display_state["mode"] != self.state["mode"] and  self.state["mode"] != "Test" ):
+            # duration
+            duration = self.get_exposure_duration();
+            duration = round(duration, 1)
+            secs = f"{duration}s";
+            self.lcd.setCursor(10, 0)
+            self.lcd.printout(f"{secs: >6}")
+            
+            # base
             base = self.state['base']
             base = round(base, 1)
-            self.lcd.setCursor(0, 1)
             secs = f"{base}s";
+            self.lcd.setCursor(0, 1)
             self.lcd.printout(f"{secs: <10}")
-
-        # stops - in expose mode and value has changed or we've changed mode
-        if self.state["mode"] == 'Expose' and (self.display_state["stops"] != self.state["stops"] or self.display_state["mode"] != self.state["mode"]):
             
-            # add + to positive numbers for clarity
-            if self.state["stops"] >= 0:           
-                stops = f"+{self.state["stops"]} "
+            # stops
+            if self.state["stops"] > 0:           
+                stops = f"+{self.state["stops"]} " # + added for clarity
             else:
                 stops = f"{self.state["stops"]} "
-            
             self.lcd.setCursor(10, 1)
             self.lcd.printout(f"{stops: >6}")
 
-        # burn - in burn mode and value has changed or we have changed mode
-        if self.state["mode"] == 'Burn' and (self.display_state["burn"] != self.state["burn"] or self.display_state["mode"] != self.state["mode"]):
+            
+        elif self.state["mode"] == "Burn":
+            
+            # title
+            self.lcd.setCursor(0, 0)
+            self.lcd.printout('Burn      ')
+
+            # duration
+            duration = self.get_burn_duration();
+            duration = round(duration, 1)
+            secs = f"{duration}s";
+            self.lcd.setCursor(10, 0)
+            self.lcd.printout(f"{secs: >6}")
+            
+            # base
+            base = self.state['base']
+            base = round(base, 1)
+            secs = f"{base}s";
+            self.lcd.setCursor(0, 1)
+            self.lcd.printout(f"{secs: <10}")
+            
+            # stops to burn - always positive
             burn = f"+{self.state['burn']} "
             self.lcd.setCursor(10, 1)
             self.lcd.printout(f"{burn: >6}")
-        
-        # steps in test mode
-        if self.state["mode"] == 'Test' and (
-                 self.display_state["steps"] != self.state["steps"]
-                 or self.display_state["interval"] != self.state["interval"]
-                 or self.display_state["step"] != self.state["step"]
-                 or self.display_state["mode"] != self.state["mode"]
-                 or self.display_state["steps_mod"] != self.state["steps_mod"]
-                 ):
+            
+        elif self.state["mode"] == "Test":
+            
+            # title
+            self.lcd.setCursor(0, 0)
+            self.lcd.printout('Test      ')
+            
+            # duration
+            duration = self.get_step_duration();
+            duration = round(duration, 1)
+            secs = f"{duration}s";
+            self.lcd.setCursor(10, 0)
+            self.lcd.printout(f"{secs: >6}")
+            
+            # steps (where base would go)
             steps = self.state['steps']
-            if self.state["steps_mod"]: steps = f"{steps:} <-"
+            if self.state["steps_mod"]: steps = f"{steps:} <-" # signify changeable 
             self.lcd.setCursor(0, 1)
             self.lcd.printout(f"{self.state['step']}/{steps: <8}")
             
             interval = self.state["interval"]
             interval = f"+{interval:} "
-            if not self.state["steps_mod"]: interval = f"-> {interval:}"
+            if not self.state["steps_mod"]: interval = f"-> {interval:}" # signify changeable
             self.lcd.setCursor(8, 1)
             self.lcd.printout(f"{interval: >8}")
-
+            
+        else:
+            pass
         
         # keep a copy to see if it changes next tim
         self.display_state = self.state.copy()
-
-        
+         
     def update_lamp(self):
         pass
 
