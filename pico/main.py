@@ -17,6 +17,11 @@ class V21:
         # changes in state are reflected in the display and lamp
         self.state = {
             "mode"  : "Burn", # the mode we are in: Expose | Burn | Test | Focus | Run
+            "mode_prev": None, # used to hold a previous state when we slip into Focus or Run
+            "run_duration" : 0, # total milliseconds for this exposure
+            "run_remaining" : 0, # time  milliseconds left of this exposure
+            "run_remaining_sec" : 0, # the time in seconds (used for triggering display update)
+            "run_start" : 0, # start milliseconds (ticks) time of this segment of exposure - resets if we pause
             "base"  : 0.0,     # the basic exposure in seconds - defaults to a useful number
             "stops" : 1.0,      # number of stops over or under the base we are set for a main exposure
             "burn"  : 0.1,      # the number of stops over the base exposure that is set for the next burn
@@ -77,7 +82,7 @@ class V21:
                 self.state["burn"] = self.state["burn"] + ( (val_new - self.encoder_old_value)* 0.1 )
                 if self.state["burn"] < 0.1: self.state["burn"] = 0.1 # never below 0.1 
                 self.state["burn"] = round(self.state["burn"], 1)
-            elif self.state["mode"] == "Test":
+            elif self.state["mode"] == "Test" and self.state["step"] == 0:
                 if self.state["steps_mod"]:
                     # we are changing the number of steps
                     if val_new > self.encoder_old_value:
@@ -161,42 +166,76 @@ class V21:
             self.state["stops"] = 0.0 # and we are now at the base so zero the stops
         elif self.state["mode"] == "Burn":
             self.state["burn"] = 0.1 # convenience reset
-        elif self.state["mode"] == "Test":
+        elif self.state["mode"] == "Test" and self.state["step"] == 0:
             # toggle between changing the steps and step
             self.state["steps_mod"] = not self.state["steps_mod"]
+        elif self.state["mode"] == "Test" and self.state["step"] > 0:
+            # once we are running a sequence then this button cancels 
+            self.state["step"] = 0
         else:
             pass # do nothing if we are in Run or Pause
 
 
     def focus_btn_pressed(self):
-        if self.state["mode"] == "Expose":
-            self.state["mode"] = "Focus" # turn on focus
-        elif self.state["mode"] == "Burn":
-            self.state["mode"] = "Focus" # turn on focus
-        elif self.state["mode"] == "Test":
-            self.state["mode"] = "Focus" # turn on focus
-            self.state["step"] = 0 # cancel the running test sequence
-            pass
-        elif self.state["mode"] == "Focus":
-            self.state["mode"] = "Expose" # turn off focus
-            pass
-        elif self.state["mode"] == "Run":
-            self.state["mode"] = "Expose" # cancel a running exposure
+        
+        if self.state["mode"] == "Focus":
+            # we are already focussing so turn it off
+            self.state["mode"] = self.state["mode_prev"]
+        elif self.state["mode"] == "Run" or self.state["mode"] == "Paused":
+            # we are running and this is the cancel button
+            self.state["mode"] = self.state["mode_prev"]
             self.state["step"] = 0 # and cancel the current test sequence if any
-            pass
-        elif self.state["mode"] == "Pause":
-            self.state["mode"] = "Expose" # cancel a paused exposure
-            pass
+        elif self.state["mode"] == "Test" and self.state["step"] > 0:
+            self.state["step"] = 0
         else:
-            pass # do nothing if we whatever...
+            # we are in some other mode and so switching over to focus
+            self.state["mode_prev"] = self.state["mode"]
+            self.state["mode"] = "Focus"
 
 
     def run_btn_pressed(self):
-        # start a run
-        # increment test step if we are in test mode or step is already > 0
-        # pause a run
         
-        pass
+        if self.state["mode"] == "Run":
+            # we are already running so pause
+            self.state["mode"] = "Paused"
+        elif self.state["mode"] == "Paused":
+            self.state["mode"] = "Run"
+            self.state["run_start"] = time.ticks_ms()
+        elif self.state["mode"] == "Expose":
+            # making a regular exposure
+            print(self.state)
+            self.state["mode"] = "Run"
+            self.state["mode_prev"] = "Expose" # so we can go back afterwards
+            self.state["run_start"] = time.ticks_ms()
+            self.state["run_duration"] = self.get_exposure_duration() * 1000
+            self.state["run_remaining"] = self.state["run_duration"]
+            self.state['run_remaining_sec'] = round(self.get_exposure_duration(), 1)
+            print(self.state)
+            
+        elif self.state["mode"] == "Burn":
+            # burning stops
+            self.state["mode"] = "Run"
+            self.state["mode_prev"] = "Burn" # so we can go back afterwards
+            self.state["run_start"] = time.ticks_ms()
+            self.state["run_duration"] = self.get_burn_duration() * 1000
+            self.state["run_remaining"] = self.state["run_duration"]
+            self.state['run_remaining_sec'] = round(self.get_burn_duration(), 1)
+            
+        elif self.state["mode"] == "Test":
+            # run one of the test steps
+            self.state["mode"] = "Run"
+            self.state["mode_prev"] = "Test" # so we can go back afterwards
+            self.state["run_start"] = time.ticks_ms()
+            self.state["run_duration"] = self.get_step_duration() * 1000
+            self.state["run_remaining"] = self.state["run_duration"]
+            self.state['run_remaining_sec'] = round(self.get_step_duration(), 1)
+            self.state["step"] = self.state["step"] + 1
+
+        else:
+            pass # do nothing when in focus mode
+        
+            
+            
 
     # called in the main loop
     def poll_buttons(self):
@@ -211,7 +250,7 @@ class V21:
 
         if ((self.focus_btn.value() is 0) and (time.ticks_ms()-self.debounce_time) > 300):
             self.debounce_time=time.ticks_ms()
-            self.focus_button_pressed()
+            self.focus_btn_pressed()
 
         if ((self.run_btn.value() is 0) and (time.ticks_ms()-self.debounce_time) > 300):
             self.debounce_time=time.ticks_ms()
@@ -305,16 +344,42 @@ class V21:
             
             # steps (where base would go)
             steps = self.state['steps']
-            if self.state["steps_mod"]: steps = f"{steps:} <-" # signify changeable 
+            if self.state["steps_mod"] and self.state["step"] == 0: steps = f"{steps:} <-" # signify changeable 
             self.lcd.setCursor(0, 1)
             self.lcd.printout(f"{self.state['step']}/{steps: <8}")
             
             interval = self.state["interval"]
             interval = f"+{interval:} "
-            if not self.state["steps_mod"]: interval = f"-> {interval:}" # signify changeable
+            if not self.state["steps_mod"] and self.state["step"] == 0 : interval = f"-> {interval:}" # signify changeable
             self.lcd.setCursor(8, 1)
             self.lcd.printout(f"{interval: >8}")
+        
+        elif self.state["mode"] == "Focus":
+            self.lcd.clear()
+            self.lcd.setCursor(0, 0)
+            self.lcd.printout('   - FOCUS -   ')
+
+        elif self.state["mode"] == "Run":
             
+            # we only update the display if there has
+            # been a significant change in the time remaining
+            if self.display_state['run_remaining_sec'] != self.state['run_remaining_sec'] or self.display_state["mode"] != "Run":    
+                self.lcd.clear()
+                self.lcd.setCursor(5, 0)
+                self.lcd.printout(f"{self.state['run_remaining_sec']}s")
+
+                bars = round(16 * self.state['run_remaining'] / self.state['run_duration'])
+                bars = '=' * bars;
+                self.lcd.setCursor(0, 1)
+                self.lcd.printout(bars)
+
+        elif self.state["mode"] == "Paused":
+            self.lcd.clear()
+            self.lcd.setCursor(5, 0)
+            self.lcd.printout(f"{self.state['run_remaining_sec']}s")
+            self.lcd.setCursor(4,1)
+            self.lcd.printout("Paused")
+
         else:
             pass
         
@@ -323,6 +388,24 @@ class V21:
          
     def update_lamp(self):
         pass
+    
+    def update_timer(self):
+        if self.state["mode"] == "Run":
+            
+            now = time.ticks_ms()
+            remaining = self.state['run_remaining'] - time.ticks_diff(now, self.state["run_start"])
+            
+            if remaining <= 0:
+                self.state["mode"] = self.state["mode_prev"]
+                if self.state["mode"] == "Test" and self.state["step"] == self.state["steps"]:
+                    self.state["step"] = 0
+                    
+            else:
+                self.state['run_remaining'] = remaining
+                self.state['run_remaining_sec'] = round(remaining / 1000, 1)
+                self.state["run_start"] = now
+                
+                
 
     
 # Do the business
@@ -335,5 +418,6 @@ while(True):
     v21_timer.poll_sensor()
     v21_timer.update_display()
     v21_timer.update_lamp()
+    v21_timer.update_timer()
     
     

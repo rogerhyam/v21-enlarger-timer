@@ -5,8 +5,6 @@ from machine import Pin
 import time
 
 debounce_time=0
-
-
 set_btn = Pin(1, Pin.IN, Pin.PULL_UP)
 mode_btn = Pin(10, Pin.IN, Pin.PULL_UP)
 focus_btn = Pin(17, Pin.IN, Pin.PULL_UP)
