@@ -26,6 +26,9 @@ There is a [website with more general information about the timer here](https://
 | 23       | GND     | Foc Bnt  | VCC         |
 | 17       | GP13    | Buzzer  | -         |
 | 18       | GND     | Buzzer  | -         |
+| 32       | GP27    | Relay  | signal      |
+| 36       | 3.3V    | Relay  | VCC         |
+| 28       | GND     | Relay  | GND         |
 
 ### 1602 RBGE Waveshare Display
 

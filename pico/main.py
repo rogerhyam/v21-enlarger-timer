@@ -2,6 +2,7 @@
 
 from rotary_irq_rp2 import RotaryIRQ
 from machine import Pin
+from machine import PWM
 import RGB1602
 import time
 
@@ -72,6 +73,14 @@ class V21:
         self.set_btn = Pin(1, Pin.IN, Pin.PULL_UP)
         self.focus_btn = Pin(17, Pin.IN, Pin.PULL_UP)
         self.run_btn = Pin(16, Pin.IN, Pin.PULL_UP)
+        
+        # a buzzer to buzz with
+        self.buzzer = PWM(Pin(13, Pin.OUT), freq=200, duty_u16=32000)
+        self.buzzer.deinit() # silence it immediately
+        
+        # a lamp relay
+        self.lamp = Pin(27, Pin.OUT, Pin.PULL_DOWN)
+        self.lamp.value(0)
         
 
     # called in the main loop
@@ -386,9 +395,27 @@ class V21:
         # keep a copy to see if it changes next tim
         self.display_state = self.state.copy()
          
+
     def update_lamp(self):
-        pass
+        
+        if self.state["mode"] == "Run":
+            # lamp on
+            self.lamp.value(1)
+            if self.state["run_remaining_sec"] % 1 == 0 :
+                self.buzzer.init(freq=200, duty_u16=32000)
+            else:
+                self.buzzer.deinit()
+        elif self.state["mode"] == "Focus":
+            self.lamp.value(1)
+            if time.ticks_ms() / 1000 % 1 < 0.1:
+                self.buzzer.init(freq=200, duty_u16=int(65536*0.2))
+            else:
+                self.buzzer.deinit()
+        else:
+            self.lamp.value(0)
+            self.buzzer.deinit()
     
+
     def update_timer(self):
         if self.state["mode"] == "Run":
             
@@ -397,8 +424,14 @@ class V21:
             
             if remaining <= 0:
                 self.state["mode"] = self.state["mode_prev"]
+                self.buzzer.init(freq=200, duty_u16=int(65536*0.2))
+                time.sleep(0.5)
+                self.buzzer.deinit()
                 if self.state["mode"] == "Test" and self.state["step"] == self.state["steps"]:
                     self.state["step"] = 0
+                    self.buzzer.init(freq=100, duty_u16=int(65536*0.2))
+                    time.sleep(0.5)
+                    self.buzzer.deinit()
                     
             else:
                 self.state['run_remaining'] = remaining
