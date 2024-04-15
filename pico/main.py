@@ -212,14 +212,12 @@ class V21:
             self.state["run_start"] = time.ticks_ms()
         elif self.state["mode"] == "Expose":
             # making a regular exposure
-            print(self.state)
             self.state["mode"] = "Run"
             self.state["mode_prev"] = "Expose" # so we can go back afterwards
             self.state["run_start"] = time.ticks_ms()
             self.state["run_duration"] = self.get_exposure_duration() * 1000
             self.state["run_remaining"] = self.state["run_duration"]
             self.state['run_remaining_sec'] = round(self.get_exposure_duration(), 1)
-            print(self.state)
             
         elif self.state["mode"] == "Burn":
             # burning stops
@@ -413,8 +411,16 @@ class V21:
                 self.buzzer.deinit()
         else:
             self.lamp.value(0)
-            self.buzzer.deinit()
-    
+            
+            # if we were previously in a run state then we
+            # do a long been
+            if self.display_state["mode"] == "Run":
+                print("was run")
+                self.buzzer.init(freq=150, duty_u16=int(65536*0.2))
+                time.sleep(0.5)
+            
+            # always stop the buzzer
+            self.buzzer.deinit()    
 
     def update_timer(self):
         if self.state["mode"] == "Run":
@@ -424,15 +430,9 @@ class V21:
             
             if remaining <= 0:
                 self.state["mode"] = self.state["mode_prev"]
-                self.buzzer.init(freq=200, duty_u16=int(65536*0.2))
-                time.sleep(0.5)
-                self.buzzer.deinit()
                 if self.state["mode"] == "Test" and self.state["step"] == self.state["steps"]:
                     self.state["step"] = 0
-                    self.buzzer.init(freq=100, duty_u16=int(65536*0.2))
-                    time.sleep(0.5)
                     self.buzzer.deinit()
-                    
             else:
                 self.state['run_remaining'] = remaining
                 self.state['run_remaining_sec'] = round(remaining / 1000, 1)
@@ -450,7 +450,8 @@ while(True):
     v21_timer.poll_buttons()
     v21_timer.poll_sensor()
     v21_timer.update_display()
-    v21_timer.update_lamp()
     v21_timer.update_timer()
+    v21_timer.update_lamp()
+    
     
     
